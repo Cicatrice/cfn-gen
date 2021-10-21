@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jsonnet-libs/k8s/pkg/swagger"
+	"github.com/Cicatrice/cfn-gen/pkg/swagger"
 )
 
 // Group represents a group, like "core" or "apps"
@@ -180,7 +180,7 @@ func newKind(d swagger.Schema, name string) Kind {
 	}
 
 	// modifiers for properties
-	kind.Modifiers = modsForProps(d.Props, "", true)
+	//kind.Modifiers = modsForProps(d.Props, "", true)
 
 	// real resource? add constructor, remove withKind
 	if real {

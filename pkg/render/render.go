@@ -3,11 +3,12 @@ package render
 import (
 	"path"
 	"path/filepath"
-	"strings"
 
-	j "github.com/jsonnet-libs/k8s/pkg/builder"
-	d "github.com/jsonnet-libs/k8s/pkg/builder/docsonnet"
-	"github.com/jsonnet-libs/k8s/pkg/model"
+	"github.com/stoewer/go-strcase"
+
+	j "github.com/Cicatrice/cfn-gen/pkg/builder"
+	d "github.com/Cicatrice/cfn-gen/pkg/builder/docsonnet"
+	"github.com/Cicatrice/cfn-gen/pkg/cloudformation"
 )
 
 // Common set of directory structure / file extensions
@@ -21,39 +22,20 @@ const (
 )
 
 // Index creates gen.libsonnet, the index of all generated artifacts
-func Index(groups map[string]model.Group, name, repo, dir, description string) j.ObjectType {
+func Index(realms map[string]*cloudformation.Realm, name, repo, dir, description string) j.ObjectType {
 	fields := []j.Type{
 		d.Import(),
 		d.Pkg(name, path.Join(repo, dir, "main.libsonnet"), description),
 	}
 
-	for name := range groups {
-		imp := filepath.Join(GenPrefix, name, MainFile)
-		fields = append(fields, j.Hidden(j.Import(name, imp)))
+	for _, realm := range realms {
+		imp := filepath.Join(GenPrefix, realm.N("realm"), MainFile)
+		fields = append(fields, j.Hidden(j.Import(realm.Name, imp)))
 	}
 
 	SortFields(fields)
 
 	return j.Object("", fields...)
-}
-
-// Main creates main.libsonnet:
-// - import the generated index (gen.libsonnet)
-// - add all hand-written patches on top
-func Main(adds []string) j.Type {
-	index := j.Import("", IndexFile)
-	if len(adds) == 0 {
-		return index
-	}
-
-	elems := []j.Type{index}
-	for _, a := range adds {
-		a = filepath.Join(CustomPrefix, filepath.Base(a))
-		add := j.Import("", a)
-		elems = append(elems, add)
-	}
-
-	return j.Add("", elems...)
 }
 
 // Objects is a collection of Jsonnet objects, indexed by their expected path on
@@ -67,101 +49,106 @@ func (o Objects) Add(prefix string, set Objects) {
 	}
 }
 
-// Group renders the entire given group, returning e.g.:
-// - main.libsonnet, the group index
-// - v1/main.libsonnet, the version v1 index
-// - v1/deployment.libsonnet, Deployment
-// - v1/daemonset.libsonnet, DaemonSet
-func Group(name string, g model.Group) Objects {
+// Main creates main.libsonnet:
+// - import the generated index (gen.libsonnet)
+// - add all hand-written patches on top
+func Main(adds []string) j.Type {
+	index := j.Import("", IndexFile)
+	if len(adds) == 0 {
+		return index
+	}
+	elems := []j.Type{index}
+	for _, a := range adds {
+		a = filepath.Join(CustomPrefix, filepath.Base(a))
+		add := j.Import("", a)
+		elems = append(elems, add)
+	}
+
+	return j.Add("", elems...)
+}
+
+func Realm(name string, realm *cloudformation.Realm) j.ObjectType {
 	fields := []j.Type{
 		d.Import(),
-		d.Pkg(name, "", ""),
+		d.Pkg(realm.PackageName, "", ""),
 	}
-	objects := make(Objects)
 
-	for name, ver := range g {
-		v := Version(name, ver)
-		objects.Add(name, v)
-		fields = append(fields, j.Import(name, filepath.Join(name, MainFile)))
+	for _, service := range realm.Services {
+		imp := filepath.Join(service.N("service"), MainFile)
+		fields = append(fields, j.Hidden(j.Import(service.Name, imp)))
 	}
 
 	SortFields(fields)
-	objects[MainFile] = j.Object(name, fields...)
+	rr := j.Object(realm.PackageName, fields...)
+	return rr
+
+}
+
+func Service(name string, service *cloudformation.Service, gen string) Objects {
+	fields := []j.Type{
+		d.Import(),
+		d.Pkg(service.PackageName, "", ""),
+	}
+
+	objects := make(Objects)
+
+	for resourceName, resource := range service.ResourceTypes {
+		r := Resource(resourceName, resource)
+		fn := filepath.Join(gen, resource.FilePath()+GenExt)
+		objects[fn] = r
+		fields = append(fields, j.Import(resource.Name, fn))
+	}
+
+	SortFields(fields)
+	objects[filepath.Join(gen, service.FilePath(), MainFile)] = j.Object(service.PackageName, fields...)
 
 	return objects
 }
 
-// Version renders the entire given object, returning e.g.:
-// - /main.libsonnet, the version index
-// - /deployment.libsonnet, Deployment
-// - /daemonset.libsonnet, DaemonSet
-func Version(name string, v model.Version) Objects {
+func Resource(name string, resource *cloudformation.ResourceType) j.ObjectType {
 	fields := []j.Type{
 		d.Import(),
-		d.Pkg(name, "", ""),
-	}
-	objects := make(Objects)
-
-	for name, kind := range v.Kinds {
-		k := Kind(name, kind)
-		fn := name + GenExt
-		objects[fn] = k
-		fields = append(fields, j.Import(name, fn))
-	}
-
-	SortFields(fields)
-	objects[MainFile] = j.Object(name, fields...)
-
-	return objects
-}
-
-// Kind renders the given Kind, including all modifiers and perhaps a
-// constructor
-func Kind(name string, k model.Kind) j.ObjectType {
-	// docsonnet package
-	fields := []j.Type{
-		d.Import(),
-		d.Pkg(name, "", k.Help),
-	}
-
-	// perhaps constructor
-	if k.New != nil {
-		fn := constructor(*k.New, strings.Title(name), k.APIVersion())
-		doc := d.Func("new", k.New.Help, d.Args("name", "string"))
-		fields = append(fields, fn, doc)
+		d.Pkg(resource.PackageName, "", resource.Resource.Documentation()),
 	}
 
 	// with... functions
-	for k, m := range k.Modifiers {
+	for k, m := range resource.Modifiers {
 		if i := Modifier(k, m); i != nil {
 			fields = append(fields, i...)
 		}
 	}
 
+	// PROPERTIES
+	for propName, prop := range resource.Resource.Props {
+		/*
+			if prop.Type {
+				dArgs := d.Args(string(prop.Type), string(prop.Type))
+			} else {
+				dArgs := ""
+			}*/
+		argName := strcase.LowerCamelCase(propName)
+		dArgs := d.Args(argName, "string")
+		args := j.Args(
+			j.Required(j.String(argName, "")),
+		)
+		//set := fnResult(f, false)
+		fields = append(fields,
+			d.Func("with"+propName, prop.Documentation(), dArgs),
+			j.Func("with"+propName, args, j.ConciseObject("",
+				j.Merge(j.ConciseObject("Properties",
+					j.Ref(propName, argName),
+				)),
+			)),
+		)
+
+	}
+
 	SortFields(fields)
 
-	// mixin field for compatibility (patch to avoid recursive result)
-	fields = append(fields,
-		j.String("#mixin", "ignore"),
-		j.Ref("mixin", "self"),
-	)
-	return j.Object(name, fields...)
-}
+	// fields = append(fields,
+	// 	j.String("#mixin", "ignore"),
+	// 	j.Ref("mixin", "self"),
+	//)
 
-// constructor creates a generic constructor, that 'just' adds apiVersion and
-// kind to an object. For more sophisticated constructors, the generated
-// artifact is overridden using hand-written files later on.
-func constructor(c model.Constructor, kind, apiVersion string) j.FuncType {
-	result := j.Add("",
-		j.Object("",
-			j.String("apiVersion", apiVersion),
-			j.String("kind", kind),
-		),
-		j.Call("", "self.metadata.withName", j.Args(j.Ref("name", "name"))),
-	)
-
-	return j.Func("new",
-		j.Args(j.Required(j.String("name", ""))),
-		result,
-	)
+	return j.Object(resource.PackageName, fields...)
 }

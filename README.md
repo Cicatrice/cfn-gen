@@ -1,6 +1,29 @@
-# k8s-gen
+# cfn-gen
 
-Code generator for Jsonnet Kubernetes libraries.
+Code generator for Jsonnet AWS CloudFormation libraries.
+
+## 👷 This generator is under migration from [jsonnet-libs/k8s](https://github.com/jsonnet-libs/k8s) 🚧
+
+### What does work ?
+
+* Not much
+
+* ResourceTypes can generate with properties (Mixin not yet implemented)
+
+
+### What doesn't ?
+
+* Only type supported for the moment is `string`
+
+* Mixin not implemented yet
+
+* Composed types not implemented (List, Map, Object)
+
+* Everything
+
+* Workflow for automatic library generation
+
+🚧 Documentation beyond this point is probably not up to date 🚧
 
 This repository contains the generator code and relevant bits to generate the jsonnet
 libraries. It can generate libraries directly from OpenAPI spec v2 or by providing CRDs.
@@ -9,6 +32,7 @@ The latter are then loaded into `k3s`, which serves them back in OpenAPI spec v2
 The CI job is set up to generate and update the content of a corresponding Github
 repository for each library. The management of these repositories is done through
 Terraform.
+
 
 ## Usage
 
@@ -79,7 +103,7 @@ For that, there are two methods for extending:
 
 ### `custom` patches
 
-The [`custom/`](https://github.com/jsonnet-libs/k8s/tree/master/libs/k8s/custom)
+The [`custom/`](https://github.com/Cicatrice/cfn-gen/tree/master/libs/k8s/custom)
 directory contains a set of `.libsonnet` files, that are _automatically merged_
 with the generated result in `main.libsonnet`, so they become part of the
 exported API.
@@ -129,8 +153,8 @@ need to added by the user themselves.
 Extensions can be applied as so:
 
 ```jsonnet
-(import "github.com/jsonnet-libs/k8s-libsonnet/1.21/main.libsonnet")
-+ (import "github.com/jsonnet-libs/k8s-libsonnet/extensions/<name>.libsonnet")
+(import "github.com/Cicatrice/cfn-gen-libsonnet/1.21/main.libsonnet")
++ (import "github.com/Cicatrice/cfn-gen-libsonnet/extensions/<name>.libsonnet")
 ```
 
 A reference for these must also be made in the `config.jsonnet`:
