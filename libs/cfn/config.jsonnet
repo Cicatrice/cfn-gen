@@ -7,6 +7,8 @@ config.new(
       output: '44.00',
       openapi: 'https://d1uauaxba7bl26.cloudfront.net/latest/gzip/CloudFormationResourceSpecification.json',
       localName: 'cfn',
+      patchDir: 'custom',
+      extensionDir: 'ext',
     },
   ]
 )
